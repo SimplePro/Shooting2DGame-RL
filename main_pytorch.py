@@ -23,7 +23,7 @@ import game
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 Transition = namedtuple('Transition',
-                        ('state', 'action1', 'action2', 'next_state', 'reward1', 'reward2'))
+                        ('state', 'action', 'next_state', 'reward'))
 
 class ReplayMemory(object):
 
@@ -53,16 +53,15 @@ class DQN(nn.Module):
             nn.BatchNorm2d(32),
             nn.GELU(),
 
-            nn.Conv2d(32, 32, kernel_size=4, stride=2, padding=1), # (32, 8, 8)
-            nn.BatchNorm2d(32),
-            nn.GELU(),
-
             nn.Flatten(),
 
-            nn.Linear(32*8*8, 256),
+            nn.Linear(32*16*16, 512),
             nn.GELU(),
 
-            nn.Linear(256, n_actions)
+            nn.Linear(512, 512),
+            nn.GELU(),
+
+            nn.Linear(512, n_actions)
         )
 
     def forward(self, x):
@@ -91,7 +90,7 @@ def preprocess_state(state):
 
 class DQNSet:
     
-    def __init__(self, number=1):
+    def __init__(self):
 
         self.policy_net = DQN(n_frames=n_frames, n_actions=n_actions).to(device)
         self.target_net = DQN(n_frames=n_frames, n_actions=n_actions).to(device)
@@ -101,8 +100,6 @@ class DQNSet:
 
         self.frame_states = torch.zeros((1, 3*n_frames, 64, 64), device=device)
 
-        self.number = number
-
     def select_action(self, state):
         sample = random.random()
         if sample > EPS_THRESHOLD:
@@ -110,7 +107,23 @@ class DQNSet:
                 out = self.policy_net(state)
                 return out.max(dim=1).indices.view(1, 1)
         else:
-            return torch.tensor([[random.randint(0, n_actions-1)]], device=device, dtype=torch.long)
+            ai_x, ai_y = env.ai_position
+            player_x, player_y = env.player_position
+
+            is_left = int(player_x <= ai_x)
+            is_right = not is_left
+            is_up = int(player_y <= ai_y)
+            is_down = not is_up
+
+            direction_matrix = torch.tensor([is_right, is_left, is_down, is_up])
+            probability_matrix = torch.tensor([0.2, 0.2, 0.2, 0.2, 0.2])
+
+            if direction_matrix[env.ai_direction] == 1:
+                probability_matrix[4] += 0.3
+                probability_matrix[:4] -= 0.075
+             
+            random_action = random.choices(range(5), weights=probability_matrix.tolist(), k=1)[0]
+            return torch.tensor([[random_action]], device=device, dtype=torch.long)
 
     def optimize_model(self):
 
@@ -128,12 +141,8 @@ class DQNSet:
                                                     if s is not None])
         
         state_batch = torch.cat(batch.state)
-        if self.number == 1:
-            action_batch = torch.cat(batch.action1)
-            reward_batch = torch.cat(batch.reward1)
-        elif self.number == 2:
-            action_batch = torch.cat(batch.action2)
-            reward_batch = torch.cat(batch.reward2)
+        action_batch = torch.cat(batch.action)
+        reward_batch = torch.cat(batch.reward)
 
         out = self.policy_net(state_batch)
         state_action_values = out.gather(1, action_batch)
@@ -173,10 +182,14 @@ if __name__ == '__main__':
     EPS_END = 0.05
     EPS_DECAY = 0.99
     TAU = 0.005
-    LR = 0.00001
-    num_episodes = 1000
+    LR = 0.001
+    num_episodes = 500
     n_frames = 4
     n_actions = 5
+    dis_reward_alpha_start = 0.5
+    dis_reward_alpha = dis_reward_alpha_start
+    dis_reward_alpha_end = 0.01
+    dis_reward_decay = 0.99
     episode_durations = []
 
     env = game.ShootingGame()
@@ -186,19 +199,18 @@ if __name__ == '__main__':
 
     memory = ReplayMemory(10000)
 
-    reward1_list = []
-    reward2_list = []
+    reward_list = []
 
-    dqn_set1 = DQNSet()
-    dqn_set2 = DQNSet()
+    dqn_set = DQNSet()
+
+    # dqn_set.policy_net.load_state_dict(torch.load("./models/dqn_policy_net_episode490.pth"))
 
     frame_states = torch.zeros((1, 3*n_frames, 64, 64), device=device)
 
     for i_episode in range(num_episodes):
         print(f"EPISODE: {i_episode+1}/{num_episodes}")
         # 환경과 상태 초기화
-        sum_r1 = 0
-        sum_r2 = 0
+        sum_r = 0
         state = preprocess_state(env.reset())
         state = state.to(device).unsqueeze(0)
 
@@ -206,77 +218,66 @@ if __name__ == '__main__':
         frame_states = update_state(deepcopy(frame_states), state)
 
         for t in count():
-            action1 = dqn_set1.select_action(frame_states)
-            action2 = dqn_set2.select_action(frame_states)
+            action = dqn_set.select_action(frame_states)
 
-            next_state, (reward1, reward2), done, _ = env.step(action1.item(), action2.item())
+            next_state, reward, done, _ = env.step(action.item(), dis_reward_alpha=dis_reward_alpha)
 
             next_state = preprocess_state(next_state)
-            reward1 = torch.tensor([reward1], device=device)
-            reward2 = torch.tensor([reward2], device=device)
-            sum_r1 += reward1.item()
-            sum_r2 += reward2.item()
+            reward = torch.tensor([reward], device=device)
+            sum_r += reward.item()
 
             if done:
                 next_state = None
                 frame_states = torch.zeros((1, 3*n_frames, 64, 64), device=device)
                 EPS_THRESHOLD = max(EPS_THRESHOLD*EPS_DECAY, EPS_END)
-                reward1_list.append(sum_r1)
-                reward2_list.append(sum_r2)
+                dis_reward_alpha = max(dis_reward_alpha*dis_reward_decay, dis_reward_alpha_end)
+                reward_list.append(sum_r)
                 episode_durations.append(t+1)
-                print(f"t: {t+1}, sum_r1: {sum_r1}, avg_r1: {round(sum_r1/t, 3)}, sum_r2: {sum_r2}, avg_r2: {round(sum_r2/t, 3)}, eps_thres: {EPS_THRESHOLD}")
+                print(f"t: {t+1}, sum_r: {sum_r}, avg_r: {round(sum_r/(t+1), 3)}, eps_thres: {EPS_THRESHOLD}, dis_reward_alpha: {dis_reward_alpha}")
 
             else:
                 next_states = update_state(deepcopy(frame_states), next_state)
                 # next_state = torch.tensor(next_state, dtype=torch.float32, device=device).unsqueeze(0)
 
             # 메모리에 변이 저장
-            memory.push(frame_states, action1, action2, next_states, reward1, reward2)
+            memory.push(frame_states, action, next_states, reward)
 
             # # 다음 상태로 이동
             # state = next_state
             frame_states = next_states
 
             # (정책 네트워크에서) 최적화 한단계 수행
-            dqn_set1.optimize_model()
-            dqn_set2.optimize_model()
+            dqn_set.optimize_model()
 
             # 목표 네트워크의 가중치를 소프트 업데이트
             # θ′ ← τ θ + (1 −τ )θ′
-            target_net_state_dict = dqn_set1.target_net.state_dict()
-            policy_net_state_dict = dqn_set1.policy_net.state_dict()
+
+            target_net_state_dict = dqn_set.target_net.state_dict()
+            policy_net_state_dict = dqn_set.policy_net.state_dict()
             for key in policy_net_state_dict:
                 target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
-            dqn_set1.target_net.load_state_dict(target_net_state_dict)
-
-
-            target_net_state_dict = dqn_set2.target_net.state_dict()
-            policy_net_state_dict = dqn_set2.policy_net.state_dict()
-            for key in policy_net_state_dict:
-                target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
-            dqn_set2.target_net.load_state_dict(target_net_state_dict)
+            dqn_set.target_net.load_state_dict(target_net_state_dict)
 
             if done:
-                episode_durations.append(t + 1)
+                if i_episode % 10 == 0:
+                    torch.save(dqn_set.policy_net.state_dict(), f"./models/dqn_policy_net_episode{i_episode}.pth")
+
+                train_log = {
+                    "reward_list": reward_list,
+                    "episode_durations": episode_durations,
+                    "batch_size": BATCH_SIZE,
+                    "gamma": GAMMA,
+                    "eps_start": EPS_START,
+                    "eps_end": EPS_END,
+                    "eps_decay": EPS_DECAY,
+                    "tau": TAU,
+                    "lr": LR,
+                    "num_episodes": num_episodes,
+                    "n_frames": n_frames,
+                    "n_actions": n_actions
+                }
+
+                with open("./models/train_log.pkl", mode="wb") as f:
+                    pickle.dump(train_log, f)
+
                 break
-
-    torch.save(dqn_set1.policy_net.state_dict(), "./dqn_set1_policy_net.pth")
-    torch.save(dqn_set2.policy_net.state_dict(), "./dqn_set2_policy_net.pth")
-
-    train_log = {
-        "reward1_list": reward1_list,
-        "reward2_list": reward2_list,
-        "episode_durations": episode_durations,
-        "batch_size": BATCH_SIZE,
-        "gamma": GAMMA,
-        "eps_start": EPS_START,
-        "eps_end": EPS_END,
-        "eps_decay": EPS_DECAY,
-        "tau": TAU,
-        "lr": LR,
-        "num_episodes": 1000,
-        "n_frames": n_frames,
-        "n_actions": n_actions
-    }
-
-    pickle.dumps(train_log, "./train_log.pkl")
