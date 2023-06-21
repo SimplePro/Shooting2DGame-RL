@@ -22,7 +22,8 @@ class ShootingGame:
         self.ai1_bullet_color = (255, 255, 255)
         self.ai2_bullet_color = (255, 0, 0)
 
-        self.bullet_cooldown_time = 30  # Cooldown time in ticks
+        self.ai1_bullet_cooldown_time = 100
+        self.ai2_bullet_cooldown_time = 30  # Cooldown time in ticks
 
         self.ai1_initial_range_x = (self.ai_size, self.WIDTH - self.ai_size)
         self.ai1_initial_range_y = (self.ai_size, self.HEIGHT - self.ai_size)
@@ -253,7 +254,7 @@ class ShootingGame:
             bullet_direction = self.ai1_direction
 
             self.ai1_bullets.append((bullet_x, bullet_y, bullet_direction))
-            self.ai1_bullet_cooldown = self.bullet_cooldown_time
+            self.ai1_bullet_cooldown = self.ai1_bullet_cooldown_time
 
             # dis_x = (-abs(self.ai2_position[0] - self.ai1_position[0]) / 64) + 1
             # dis_y = (-abs(self.ai2_position[1] - self.ai1_posfition[1]) / 64) + 1
@@ -293,7 +294,7 @@ class ShootingGame:
             bullet_direction = self.ai2_direction
 
             self.ai2_bullets.append((bullet_x, bullet_y, bullet_direction))
-            self.ai2_bullet_cooldown = self.bullet_cooldown_time
+            self.ai2_bullet_cooldown = self.ai2_bullet_cooldown_time
 
             # dis_x = (-abs(self.ai2_position[0] - self.ai1_position[0]) / 64) + 1
             # dis_y = (-abs(self.ai2_position[1] - self.ai1_position[1]) / 64) + 1
@@ -417,14 +418,14 @@ class ShootingGame:
                 50,
                 250
                 - 200
-                * (self.ai1_bullet_cooldown / self.bullet_cooldown_time),
+                * (self.ai1_bullet_cooldown / self.ai1_bullet_cooldown_time),
             )
         if self.ai2_bullet_cooldown > 0:
             self.ai2_bullet_cooldown -= 1
             self.ai2_eye_color = (
                 50,
                 50,
-                250 - 200 * (self.ai2_bullet_cooldown / self.bullet_cooldown_time),
+                250 - 200 * (self.ai2_bullet_cooldown / self.ai2_bullet_cooldown_time),
             )
 
         for event in pygame.event.get():

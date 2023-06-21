@@ -106,12 +106,14 @@ class DQNSet:
 
         self.number = number
 
+        self.is_fixed = False
+
     def select_action(self, state):
         
         if self.number == 1:
             shoot_smaple = random.random()
             
-            if shoot_smaple <= SHOOT_EPS_THRESHOLD:
+            if shoot_smaple <= SHOOT_EPS_THRESHOLD[self.number-1]:
 
                 # position(x, y)
                 dis_x = abs(env.ai2_position[0] - env.ai1_position[0])
@@ -188,37 +190,114 @@ class DQNSet:
                         # return torch.tensor([[0, 1, 0, 0, 0, 0]], device=device, dtype=torch.long)
 
 
+        if self.number == 2:
+            shoot_smaple = random.random()
+            
+            if shoot_smaple <= SHOOT_EPS_THRESHOLD[self.number-1]:
+
+                # position(x, y)
+                dis_x = abs(env.ai2_position[0] - env.ai1_position[0])
+                dis_y = abs(env.ai2_position[1] - env.ai1_position[1])
+
+                # print(dis_x, dis_y)
+
+                # if two players are on approximately the same x
+                if dis_x <= 3:
+
+                    is_up = env.ai1_position[1] <= env.ai2_position[1]
+
+                    # print("is_up:", is_up)
+                    # direction(up, right, down, left)
+                    # action(right, left, down, up, shoot, stay)
+                    
+                    # if ai1 is looking upward and ai2 is above ai1
+                    if env.ai2_direction == 0 and is_up == 1:
+                        # just shoot
+                        action = torch.tensor([[4]], device=device, dtype=torch.long)
+                        # print("shoot")
+                        return action
+                    
+                    # if ai1 is looking downward and ai2 is below ai1
+                    elif env.ai2_direction == 2 and is_up == 0:
+                        # just shoot
+                        action = torch.tensor([[4]], device=device, dtype=torch.long)
+                        # print("shoot")
+                        return action
+                    
+                    # if ai2 is above ai1
+                    elif is_up:
+                        # look at upward
+                        # print("look at upward")
+                        return torch.tensor([[3]], device=device, dtype=torch.long)
+                        # return torch.tensor([[1, 0, 0, 0, 0, 0]], device=device, dtype=torch.long)
+
+                    # if ai2 is below ai1
+                    else:
+                        # look at downward
+                        # print("look at downward")
+                        return torch.tensor([[2]], device=device, dtype=torch.long)
+                        # return torch.tensor([[0, 0, 1, 0, 0, 0]], device=device, dtype=torch.long)
+                
+                # if two players are on approximately the same y
+                if dis_y <= 3:
+                    is_left = env.ai1_position[0] <= env.ai2_position[0]
+
+                    # print("is_left:", is_left)
+
+                    # if ai1 is looking at left and ai2 is on ai1's left
+                    if env.ai2_direction == 3 and is_left == 1:
+                        # just shoot
+                        # print("shoot")
+                        return torch.tensor([[4]], device=device, dtype=torch.long)
+                    
+                    # if ai1 is looking at right and ai2 is on ai's right
+                    elif env.ai2_direction == 1 and is_left == 0:
+                        # print("shoot")
+                        return torch.tensor([[4]], device=device, dtype=torch.long)
+                    
+                    # if ai2 is on ai's left
+                    elif is_left:
+                        # look at left
+                        # print("look at left")
+                        return torch.tensor([[1]], device=device, dtype=torch.long)
+                        # return torch.tensor([[0, 0, 0, 1, 0, 0]], device=device, dtype=torch.long)
+                    
+                    # if ai2 is on ai's right
+                    else:
+                        # look at right
+                        # print("look at right")
+                        return torch.tensor([[0]], device=device, dtype=torch.long)
+                        # return torch.tensor([[0, 1, 0, 0, 0, 0]], device=device, dtype=torch.long)
+
+        if self.is_fixed:
+            return torch.tensor([[5]], device=device, dtype=torch.long)
+        
         sample = random.random()
         if sample > EPS_THRESHOLD:
             with torch.no_grad():
                 out = self.policy_net(state)
                 return out.max(dim=1).indices.view(1, 1)
         else:
-            if self.number == 2:
-                random_action = random.randint(0, 5)
-                return torch.tensor([[random_action]], device=device, dtype=torch.long)
-        
-            else:
-                ai1_x, ai1_y = env.ai1_position
-                ai2_x, ai2_y = env.ai2_position
+            ai1_x, ai1_y = env.ai2_position
+            ai2_x, ai2_y = env.ai1_position
 
-                is_left = int(ai2_x <= ai1_x)
-                is_right = not is_left
-                is_up = int(ai2_y <= ai1_y)
-                is_down = not is_up
+            is_left = int(ai1_x <= ai2_x)
+            is_right = not is_left
+            is_up = int(ai1_y <= ai2_y)
+            is_down = not is_up
 
-                direction_matrix = torch.tensor([is_up, is_right, is_down, is_left])
-                probability_matrix = torch.tensor([1, 1, 1, 1, 1, 1], dtype=torch.float32)
+            direction_matrix = torch.tensor([is_up, is_right, is_down, is_left])
+            probability_matrix = torch.tensor([1, 1, 1, 1, 1, 1], dtype=torch.float32)
 
-                # direction(up, right, down, left)
-                # action(right, left, down, up, shoot, stay)
+            # direction(up, right, down, left)
+            # action(right, left, down, up, shoot, stay)
 
-                if direction_matrix[env.ai1_direction] == 1:
-                    probability_matrix[4] += 4
-                    probability_matrix /= torch.sum(probability_matrix)
-                
-                random_action = random.choices(range(6), weights=probability_matrix.tolist(), k=1)[0]
-                return torch.tensor([[random_action]], device=device, dtype=torch.long)
+            if direction_matrix[env.ai2_direction] == 1:
+                probability_matrix[4] += 4
+                probability_matrix /= torch.sum(probability_matrix)
+            
+            random_action = random.choices(range(6), weights=probability_matrix.tolist(), k=1)[0]
+            return torch.tensor([[random_action]], device=device, dtype=torch.long)
 
     def optimize_model(self):
 
@@ -281,26 +360,31 @@ if __name__ == '__main__':
     BATCH_SIZE = 64
     GAMMA = 0.8
 
-    EPS_START = 0.1
+    EPS_START = 0.5
     EPS_THRESHOLD = EPS_START
     EPS_END = 0.05
     EPS_DECAY = 0.99
 
-    SHOOT_EPS_START = 0.4
-    SHOOT_EPS_THRESHOLD = SHOOT_EPS_START
-    SHOOT_EPS_DECAY = 0.999
-    SHOOT_EPS_END = 0.4
+    FIXED_EPS_START = 0.9
+    FIXED_EPS_THRESHOLD = FIXED_EPS_START
+    FIXED_EPS_DECAY = 0.995
+    FIXED_EPS_END = 0.4
+
+    SHOOT_EPS_START = [0.9, 0.9] # [GREEN PLAYER, RED PLAYER]
+    SHOOT_EPS_THRESHOLD = SHOOT_EPS_START # [GREEN PLAYER, RED PLAYER]
+    SHOOT_EPS_DECAY = [0.995, 0.99] # [GREEN PLAYER, RED PLAYER]
+    SHOOT_EPS_END = [0.4, 0.05] # [GREEN PLAYER, RED PLAYER]
 
     TAU = 0.005
     LR = 0.001
-    start_episode = 1640
+    start_episode = 0
     num_episodes = 10000
     n_frames = 4
     n_actions = 6 # action(right, left, down, up, shoot, stay)
-    DIS_REWARD_ALPHA_START = 0
+    DIS_REWARD_ALPHA_START = 0.2
     DIS_REWARD_ALPHA = DIS_REWARD_ALPHA_START
-    DIS_REWARD_ALPHA_END = 0
-    DIS_REWARD_DECAY = 0.99
+    DIS_REWARD_ALPHA_END = 0.05
+    DIS_REWARD_DECAY = 0.999
     episode_durations = []
 
     env = ai_vs_ai_game.ShootingGame()
@@ -316,8 +400,8 @@ if __name__ == '__main__':
     loss1_list = []
     loss2_list = []
 
-    dqn_set1 = DQNSet(model_path="./models/ver2/dqn_policy_net1_episode1640.pth", number=1)
-    dqn_set2 = DQNSet(model_path="./models/ver2/dqn_policy_net1_episode1640.pth", number=2)
+    dqn_set1 = DQNSet(model_path="", number=1)
+    dqn_set2 = DQNSet(model_path="", number=2)
 
     frame_states = torch.zeros((1, 3*n_frames, 64, 64), device=device)
 
@@ -328,6 +412,9 @@ if __name__ == '__main__':
         sum_r2 = 0
         state = preprocess_state(env.reset())
         state = state.to(device).unsqueeze(0)
+
+        dqn_set1.is_fixed = random.random() <= FIXED_EPS_THRESHOLD
+        print(dqn_set1.is_fixed)
 
         # state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
         frame_states = update_state(deepcopy(frame_states), state)
@@ -349,12 +436,15 @@ if __name__ == '__main__':
                 next_state = None
                 frame_states = torch.zeros((1, 3*n_frames, 64, 64), device=device)
                 EPS_THRESHOLD = max(EPS_THRESHOLD*EPS_DECAY, EPS_END)
-                SHOOT_EPS_THRESHOLD = max(SHOOT_EPS_THRESHOLD*SHOOT_EPS_DECAY, SHOOT_EPS_END)
+                SHOOT_EPS_THRESHOLD[0] = max(SHOOT_EPS_THRESHOLD[0]*SHOOT_EPS_DECAY[0], SHOOT_EPS_END[0])
+                SHOOT_EPS_THRESHOLD[1] = max(SHOOT_EPS_THRESHOLD[1]*SHOOT_EPS_DECAY[1], SHOOT_EPS_END[1])
+                FIXED_EPS_THRESHOLD = max(FIXED_EPS_THRESHOLD*FIXED_EPS_DECAY, FIXED_EPS_END)
                 DIS_REWARD_ALPHA = max(DIS_REWARD_ALPHA*DIS_REWARD_DECAY, DIS_REWARD_ALPHA_END)
                 reward1_list.append(sum_r1)
                 reward2_list.append(sum_r2)
                 episode_durations.append(t+1)
-                print(f"t: {t+1}, sum_r1: {sum_r1}, avg_r1: {round(sum_r1/(t+1), 3)}, sum_r2: {sum_r2}, avg_r2: {round(sum_r2/(t+1), 3)}, eps_thres: {EPS_THRESHOLD}, shoot_eps_threshold: {SHOOT_EPS_THRESHOLD}, dis_reward_alpha: {DIS_REWARD_ALPHA}")
+                print(f"t: {t+1}, sum_r1: {sum_r1}, avg_r1: {round(sum_r1/(t+1), 3)}, sum_r2: {sum_r2}, avg_r2: {round(sum_r2/(t+1), 3)}, eps_thres: {round(EPS_THRESHOLD, 3)}, \n \
+                    shoot_eps_threshold: {list(map(lambda x: round(x, 3), SHOOT_EPS_THRESHOLD))}, fixed_eps_threshold: {round(FIXED_EPS_THRESHOLD, 3)}, dis_reward_alpha: {DIS_REWARD_ALPHA}")
 
             else:
                 next_states = update_state(deepcopy(frame_states), next_state)
@@ -396,17 +486,20 @@ if __name__ == '__main__':
                 next_state = None
                 frame_states = torch.zeros((1, 3*n_frames, 64, 64), device=device)
                 EPS_THRESHOLD = max(EPS_THRESHOLD*EPS_DECAY, EPS_END)
-                SHOOT_EPS_THRESHOLD = max(SHOOT_EPS_THRESHOLD*SHOOT_EPS_DECAY, SHOOT_EPS_END)
+                SHOOT_EPS_THRESHOLD[0] = max(SHOOT_EPS_THRESHOLD[0]*SHOOT_EPS_DECAY[0], SHOOT_EPS_END[0])
+                SHOOT_EPS_THRESHOLD[1] = max(SHOOT_EPS_THRESHOLD[1]*SHOOT_EPS_DECAY[1], SHOOT_EPS_END[1])
+                FIXED_EPS_THRESHOLD = max(FIXED_EPS_THRESHOLD*FIXED_EPS_DECAY, FIXED_EPS_END)
                 DIS_REWARD_ALPHA = max(DIS_REWARD_ALPHA*DIS_REWARD_DECAY, DIS_REWARD_ALPHA_END)
                 reward1_list.append(sum_r1)
                 reward2_list.append(sum_r2)
                 episode_durations.append(t+1)
-                print(f"t: {t+1}, sum_r1: {sum_r1}, avg_r1: {round(sum_r1/(t+1), 3)}, sum_r2: {sum_r2}, avg_r2: {round(sum_r2/(t+1), 3)}, eps_thres: {EPS_THRESHOLD}, shoot_eps_threshold: {SHOOT_EPS_THRESHOLD}, dis_reward_alpha: {DIS_REWARD_ALPHA}")
+                print(f"t: {t+1}, sum_r1: {sum_r1}, avg_r1: {round(sum_r1/(t+1), 3)}, sum_r2: {sum_r2}, avg_r2: {round(sum_r2/(t+1), 3)}, eps_thres: {round(EPS_THRESHOLD, 3)}, \n \
+                    shoot_eps_threshold: {list(map(lambda x: round(x, 3), SHOOT_EPS_THRESHOLD))}, fixed_eps_threshold: {round(FIXED_EPS_THRESHOLD, 3)}, dis_reward_alpha: {DIS_REWARD_ALPHA}")
 
             if done:
                 if i_episode % 10 == 0:
-                    torch.save(dqn_set1.policy_net.state_dict(), f"./models/ver2/dqn_policy_net1_episode{i_episode}.pth")
-                    torch.save(dqn_set2.policy_net.state_dict(), f"./models/ver2/dqn_policy_net2_episode{i_episode}.pth")
+                    torch.save(dqn_set1.policy_net.state_dict(), f"./models/ver5/dqn_policy_net1_episode{i_episode}.pth")
+                    torch.save(dqn_set2.policy_net.state_dict(), f"./models/ver5/dqn_policy_net2_episode{i_episode}.pth")
 
 
                 train_log = {
@@ -420,6 +513,12 @@ if __name__ == '__main__':
                     "eps_start": EPS_START,
                     "eps_end": EPS_END,
                     "eps_decay": EPS_DECAY,
+                    "shoot_eps_start": SHOOT_EPS_START,
+                    "shoot_eps_end": SHOOT_EPS_END,
+                    "shoot_eps_decay": SHOOT_EPS_DECAY,
+                    "fixed_eps_start": FIXED_EPS_START,
+                    "fixed_eps_end": FIXED_EPS_END,
+                    "fixed_eps_decay": FIXED_EPS_DECAY,
                     "tau": TAU,
                     "lr": LR,
                     "start_epgisodes": start_episode,
@@ -428,7 +527,7 @@ if __name__ == '__main__':
                     "n_actions": n_actions
                 }
 
-                with open(f"./models/ver2/{start_episode}_train_log.pkl", mode="wb") as f:
+                with open(f"./models/ver5/{start_episode}_train_log.pkl", mode="wb") as f:
                     pickle.dump(train_log, f)
 
                 break
